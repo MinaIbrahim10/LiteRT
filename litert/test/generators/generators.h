@@ -34,5 +34,6 @@
 #include "litert/test/generators/concatenation.h"  // IWYU pragma: export
 #include "litert/test/generators/softmax.h"  // IWYU pragma: export
 #include "litert/test/generators/pad.h"  // IWYU pragma: export
+#include "litert/test/generators/sdpa.h"  // IWYU pragma: export
 
 #endif  // THIRD_PARTY_ODML_LITERT_LITERT_TEST_GENERATORS_GENERATORS_H_

@@ -606,6 +606,33 @@ cc_library(
 )
 
 cc_library(
+    name = "sdpa",
+    testonly = True,
+    hdrs = ["sdpa.h"],
+    deps = [
+        ":common",
+        ":graph_helpers",
+        "//litert/c:litert_common",
+        "//litert/cc:litert_element_type",
+        "//litert/cc:litert_expected",
+        "//litert/cc:litert_layout",
+        "//litert/cc:litert_macros",
+        "//litert/cc/internal:litert_rng",
+        "//litert/core/model",
+        "//litert/test:simple_buffer",
+        "//tensor",
+        "//tensor:arithmetic",
+        "//tensor:buffer",
+        "//tensor:datatypes",
+        "//tensor/backends/tflite:arithmetic_tflite",
+        "//tflite/types:half",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/strings:string_view",
+        "@flatbuffers//:runtime_cc",
+    ],
+)
+
+cc_library(
     name = "generators",
     testonly = True,
     hdrs = ["generators.h"],
@@ -625,6 +652,7 @@ cc_library(
         ":pooling",
         ":reduction",
         ":reshape",
+        ":sdpa",
         ":softmax",
         ":transformer_layer",
         ":transpose",

@@ -52,6 +52,8 @@ litert_define_ats(
         "Conv2d.*f16",  # XNNPACK delegate at ToT does not yet support f16 Conv2d
         "BatchMatmul.*f16",  # XNNPACK delegate at ToT does not yet support f16 BatchMatmul
         "FullyConnected.*(f16|i8|u8|SHUFFLED)",  # XNNPACK delegate at ToT does not yet support these FullyConnected presets
+        "Sdpa.*f16",  # XNNPACK delegate does not support f16 SDPA
+        "Sdpa.*x8x[0-9]+>.*x1x[0-9]+>",  # XNNPACK delegate does not support 8-head MQA decode
         "FullyConnected.*,2d_f32.*,1d_f32",
         "FullyConnected.*,2d_f32[^c]",
         "FullyConnected.*_cst.*,1d_f32[^c]",
@@ -316,6 +318,8 @@ litert_test(
         "--dont_register=Conv2d.*f16",  # XNNPACK delegate at ToT does not yet support f16 Conv2d
         "--dont_register=BatchMatmul.*f16",  # XNNPACK delegate at ToT does not yet support f16 BatchMatmul
         "--dont_register=FullyConnected.*(f16|i8|u8|SHUFFLED)",  # XNNPACK delegate at ToT does not yet support these FullyConnected presets
+        "--dont_register=Sdpa.*f16",  # XNNPACK delegate does not support f16 SDPA
+        "--dont_register=Sdpa.*x8x[0-9]+>.*x1x[0-9]+>",  # XNNPACK delegate does not support 8-head MQA decode
         "--dont_register=FullyConnected.*,2d_f32.*,1d_f32",
         "--dont_register=FullyConnected.*,2d_f32[^c]",
         "--dont_register=FullyConnected.*_cst.*,1d_f32[^c]",
@@ -354,6 +358,7 @@ litert_test(
         ":register_pooling",
         ":register_reduction",
         ":register_reshape",
+        ":register_sdpa",
         ":register_softmax",
         ":register_transformer_layer",
         ":register_transpose",
@@ -611,6 +616,23 @@ cc_library(
 )
 
 cc_library(
+    name = "register_sdpa",
+    testonly = True,
+    srcs = ["register_sdpa.cc"],
+    hdrs = ["register_sdpa.h"],
+    copts = commandline_flag_copts(),
+    deps = [
+        ":compile_fixture",
+        ":configure",
+        ":inference_fixture",
+        ":register",
+        "//litert/cc/internal:litert_detail",
+        "//litert/test/generators:sdpa",
+        "//tflite/types:half",
+    ],
+)
+
+cc_library(
     name = "register_softmax",
     testonly = True,
     srcs = ["register_softmax.cc"],
@@ -804,6 +826,7 @@ cc_library(
         "//litert/test:simple_buffer",
         "//litert/test/generators:common",
         "//tflite/types:half",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
@@ -990,6 +1013,8 @@ cc_library(
         ":common",
         ":configure",
         ":print",
+        "//litert/c:litert_any",
+        "//litert/cc/internal:litert_compiled_model_next",
         "//litert/core/model",
         "@com_google_absl//absl/strings:str_format",
     ],
