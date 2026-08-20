@@ -147,6 +147,14 @@ class GpuBackendWebGpu : public GpuBackend {
     return memory_manager_;
   }
 
+  uint64_t GetSizeOfMemoryAllocatedForIntermediateTensors() const override {
+    return memory_manager_.GetSizeOfMemoryAllocatedForIntermediateTensors();
+  }
+
+  uint64_t GetSizeOfMemoryAllocatedForConstantTensors() const override {
+    return memory_manager_.GetSizeOfMemoryAllocatedForConstTensors();
+  }
+
   // Encoders for IO tensors.
   wgpu::CommandEncoder* command_encoder() const {
     return command_encoder_.get();

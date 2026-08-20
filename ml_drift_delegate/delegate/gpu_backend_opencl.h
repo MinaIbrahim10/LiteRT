@@ -131,6 +131,14 @@ class GpuBackendOpenCl : public GpuBackend {
 
   ::ml_drift::cl::MemoryManager& memory_manager() { return memory_manager_; }
 
+  uint64_t GetSizeOfMemoryAllocatedForIntermediateTensors() const override {
+    return memory_manager_.GetSizeOfMemoryAllocatedForIntermediateTensors();
+  }
+
+  uint64_t GetSizeOfMemoryAllocatedForConstantTensors() const override {
+    return memory_manager_.GetConstantTensorsSize();
+  }
+
  private:
   std::unique_ptr<::ml_drift::cl::Environment> env_owned_;
   ::ml_drift::cl::Environment* const env_;

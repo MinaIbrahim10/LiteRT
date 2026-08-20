@@ -149,6 +149,12 @@ class GpuBackendMetal : public GpuBackend {
   // Underlying Metal device.
   ::ml_drift::metal::MetalDevice* metal_device() const { return device_; }
   ::ml_drift::metal::MemoryManager& memory_manager() { return memory_manager_; }
+  uint64_t GetSizeOfMemoryAllocatedForIntermediateTensors() const override {
+    return memory_manager_.GetIntermediateTensorsSize();
+  }
+  uint64_t GetSizeOfMemoryAllocatedForConstantTensors() const override {
+    return memory_manager_.GetConstantTensorsSize();
+  }
   // Underlying Metal command queue.
   id<MTLCommandQueue> command_queue() const { return command_queue_; }
   id<MTLResidencySet> residency_set() const { return residency_set_; }

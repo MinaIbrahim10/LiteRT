@@ -290,6 +290,18 @@ class GpuBackend {
   CreateBuffer2TensorConverter(
       const ::ml_drift::BufferDescriptor& src_desc,
       const ::ml_drift::TensorDescriptor& dst_desc) = 0;
+
+  // Returns the size of memory allocated for intermediate tensors.
+  // [OPTIONAL] Only when backend supports memory management.
+  virtual uint64_t GetSizeOfMemoryAllocatedForIntermediateTensors() const {
+    return 0;
+  }
+
+  // Returns the size of memory allocated for constant tensors.
+  // [OPTIONAL] Only when backend supports memory management.
+  virtual uint64_t GetSizeOfMemoryAllocatedForConstantTensors() const {
+    return 0;
+  }
 };
 
 // Inference context of a GPU backend initialized with a GPU model. It's a
