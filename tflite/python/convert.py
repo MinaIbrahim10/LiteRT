@@ -348,6 +348,38 @@ def convert(
     raise converter_error
 
 
+def convert_mlir_bytecode(
+    conversion_flags: _conversion_flags_pb2.ConverterFlags,
+    model_dir: str,
+    output_file_path: str,
+):
+  """Converts `model_dir` to a TFLite model file directly.
+
+  Args:
+    conversion_flags: Proto describing conversion properties, see
+      `compiler/mlir/lite/converter_flags.proto`.
+    model_dir: Directory containing the MLIR bytecode and weights.
+    output_file_path: Path where the TFLite model should be saved.
+
+  Returns:
+    Status or result of the conversion.
+
+  Raises:
+    ConverterError: When conversion fails.
+  """
+  try:
+    return wrap_converter.wrapped_convert_mlir_bytecode(
+        conversion_flags.SerializeToString(),
+        model_dir,
+        output_file_path,
+    )
+  except Exception as e:
+    converter_error = ConverterError(str(e))
+    for error_data in _metrics_wrapper.retrieve_collected_errors():
+      converter_error.append_error(error_data)
+    raise converter_error from e
+
+
 def build_model_flags(
     change_concat_input_ranges=False,
     allow_nonexistent_arrays=False,
@@ -419,6 +451,7 @@ def build_conversion_flags(
     accumulation_type=None,
     allow_bfloat16=False,
     unfold_large_splat_constant=False,
+    fold_fp16_resource_casts=True,
     supported_backends=None,
     disable_per_channel_quantization=False,
     enable_mlir_dynamic_range_quantizer=False,
@@ -449,6 +482,8 @@ def build_conversion_flags(
     serialize_debug_metadata=False,
     unsafe_fuse_dynamic_shaped_broadcast=False,
     unsafe_single_batch_rank_reduction=False,
+    enable_debug=False,
+    debug_dir=None,
     **_,
 ):
   """Builds protocol buffer describing a conversion of a model.
@@ -653,6 +688,7 @@ def build_conversion_flags(
     )
   conversion_flags.allow_bfloat16 = allow_bfloat16
   conversion_flags.unfold_large_splat_constant = unfold_large_splat_constant
+  conversion_flags.fold_fp16_resource_casts = fold_fp16_resource_casts
   if supported_backends:
     conversion_flags.supported_backends.extend(supported_backends)
   conversion_flags.disable_per_channel_quantization = (
@@ -695,6 +731,10 @@ def build_conversion_flags(
     conversion_flags.debug_options.elide_elementsattrs_if_larger = (
         elide_elementsattrs_if_larger
     )
+
+  conversion_flags.enable_debug = enable_debug
+  if debug_dir is not None:
+    conversion_flags.debug_dir = debug_dir
 
   if use_buffer_offset is not None:
     conversion_flags.use_buffer_offset = use_buffer_offset
