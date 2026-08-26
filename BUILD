@@ -13,6 +13,7 @@
 # limitations under the License.
 
 exports_files([
+    "LICENSE",
     "PATCH.flatbuffers_windows_no_bash",
     "PATCH.perfetto",
     "PATCH.protobuf_port_msvc_compat",
