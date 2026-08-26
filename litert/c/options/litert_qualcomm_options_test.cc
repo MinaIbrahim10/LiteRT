@@ -589,5 +589,27 @@ TEST(LiteRtQualcommOptionsTest, LpaiOptions) {
   LrtDestroyQualcommOptions(qualcomm_options);
 }
 
+TEST(LiteRtQualcommOptionsTest, QnnLibDir) {
+  auto options = QualcommOptions::Create();
+  ASSERT_TRUE(options.HasValue());
+  EXPECT_EQ(options->GetQnnLibDir(), "");
+  options->SetQnnLibDir("/path/to/qnn/lib");
+  EXPECT_EQ(options->GetQnnLibDir(), "/path/to/qnn/lib");
+
+  auto parsed = SerializeAndParse(options->Get());
+  EXPECT_EQ(parsed.GetQnnLibDir(), "/path/to/qnn/lib");
+}
+
+TEST(LiteRtQualcommOptionsTest, DspSkelDir) {
+  auto options = QualcommOptions::Create();
+  ASSERT_TRUE(options.HasValue());
+  EXPECT_EQ(options->GetDspSkelDir(), "");
+  options->SetDspSkelDir("/path/to/dsp/skel");
+  EXPECT_EQ(options->GetDspSkelDir(), "/path/to/dsp/skel");
+
+  auto parsed = SerializeAndParse(options->Get());
+  EXPECT_EQ(parsed.GetDspSkelDir(), "/path/to/dsp/skel");
+}
+
 }  // namespace
 }  // namespace litert::qualcomm
