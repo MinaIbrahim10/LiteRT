@@ -1464,6 +1464,10 @@ absl::Status SharedMemoryManager::CreateSharedTensor(
   // weights from MediaPipe (e.g. inpainting models) or non-float constants
   // (e.g. shape/pack tensors).
   switch (tensor_desc.GetDataType()) {
+    case DataType::INT8:
+      tensor_desc.UploadData<int8_t>(
+          reinterpret_cast<const int8_t*>(tensor.data.int8));
+      break;
     case DataType::INT32:
       tensor_desc.UploadData<int32_t>(tensor.data.i32);
       break;
