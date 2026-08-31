@@ -181,7 +181,8 @@ absl::Status SerializationProgramCache::Insert(uint64_t key,
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::string> SerializationProgramCache::LookUp(uint64_t key) {
+absl::StatusOr<MMapHandle> SerializationProgramCache::LookUpHandle(
+    uint64_t key) {
   if (!fd_.IsValid()) {
     return absl::InvalidArgumentError("Invalid file descriptor.");
   }
@@ -229,16 +230,20 @@ absl::StatusOr<std::string> SerializationProgramCache::LookUp(uint64_t key) {
     return absl::InternalError("Data offset/size out of bounds.");
   }
 
-  std::string result;
-  result.resize(found_size);
-  if (fd_.SetPos(found_offset) == -1) {
-    return absl::InternalError("Failed to seek to data.");
-  }
-  if (!fd_.Read(result.data(), found_size)) {
-    return absl::InternalError("Failed to read data.");
+  MMapHandle data_handle;
+  if (auto status = data_handle.Map(fd_, found_offset, found_size);
+      !status.ok()) {
+    return status;
   }
 
-  return result;
+  return data_handle;
+}
+
+absl::StatusOr<std::string> SerializationProgramCache::LookUp(uint64_t key) {
+  auto handle_or = LookUpHandle(key);
+  if (!handle_or.ok()) return handle_or.status();
+  return std::string(reinterpret_cast<const char*>(handle_or->data()),
+                     handle_or->size());
 }
 
 }  // namespace ml_drift
