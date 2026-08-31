@@ -24,10 +24,13 @@ public enum ElementType: UInt32 {
   case int16 = 7
   case int32 = 2
   case int64 = 4
+  case uint4 = 21
   case uint8 = 3
   case uint16 = 17
   case uint32 = 16
   case uint64 = 13
+  case float8E4M3FN = 22
+  case float8E5M2 = 23
   case float16 = 10
   case bfloat16 = 19
   case float32 = 1
@@ -79,10 +82,12 @@ public struct Layout: Equatable {
 public struct TensorType: Equatable {
   public let elementType: ElementType
   public let layout: Layout
+  public let quantization: Quantization?
 
-  public init(elementType: ElementType, layout: Layout) {
+  public init(elementType: ElementType, layout: Layout, quantization: Quantization? = nil) {
     self.elementType = elementType
     self.layout = layout
+    self.quantization = quantization
   }
 }
 

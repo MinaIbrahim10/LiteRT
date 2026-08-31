@@ -70,6 +70,7 @@ swift_test(
     data = [
         "//litert/test:testdata/dynamic_add_model.tflite",
         "//litert/test:testdata/simple_model.tflite",
+        "//litert/test:testdata/simple_quantized_ops.tflite",
     ] + litert_gpu_accelerator_prebuilts(),
     deps = [
         ":CLiteRT_objc",

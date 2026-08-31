@@ -477,6 +477,62 @@ public final class CompiledModel {
     return TensorBufferRequirements(cRequirements: requirements, owned: false)
   }
 
+  private func getInputTensor(inputIndex: Int, signatureIndex: Int) throws -> LiteRtTensor {
+    var signature: LiteRtSignature?
+    var status = LiteRtGetModelSignature(cModel, size_t(signatureIndex), &signature)
+    try checkStatus(status)
+    guard let signature else { throw LiteRtError.runtimeFailure }
+
+    var tensor: LiteRtTensor?
+    status = LiteRtGetSignatureInputTensorByIndex(signature, size_t(inputIndex), &tensor)
+    try checkStatus(status)
+    guard let tensor else { throw LiteRtError.runtimeFailure }
+    return tensor
+  }
+
+  private func getOutputTensor(outputIndex: Int, signatureIndex: Int) throws -> LiteRtTensor {
+    var signature: LiteRtSignature?
+    var status = LiteRtGetModelSignature(cModel, size_t(signatureIndex), &signature)
+    try checkStatus(status)
+    guard let signature else { throw LiteRtError.runtimeFailure }
+
+    var tensor: LiteRtTensor?
+    status = LiteRtGetSignatureOutputTensorByIndex(signature, size_t(outputIndex), &tensor)
+    try checkStatus(status)
+    guard let tensor else { throw LiteRtError.runtimeFailure }
+    return tensor
+  }
+
+  private func getInputTensor(inputName: String, signatureIndex: Int) throws -> LiteRtTensor {
+    var signature: LiteRtSignature?
+    var status = LiteRtGetModelSignature(cModel, size_t(signatureIndex), &signature)
+    try checkStatus(status)
+    guard let signature else { throw LiteRtError.runtimeFailure }
+
+    var tensor: LiteRtTensor?
+    status = inputName.withCString { cName in
+      LiteRtGetSignatureInputTensor(signature, cName, &tensor)
+    }
+    try checkStatus(status)
+    guard let tensor else { throw LiteRtError.runtimeFailure }
+    return tensor
+  }
+
+  private func getOutputTensor(outputName: String, signatureIndex: Int) throws -> LiteRtTensor {
+    var signature: LiteRtSignature?
+    var status = LiteRtGetModelSignature(cModel, size_t(signatureIndex), &signature)
+    try checkStatus(status)
+    guard let signature else { throw LiteRtError.runtimeFailure }
+
+    var tensor: LiteRtTensor?
+    status = outputName.withCString { cName in
+      LiteRtGetSignatureOutputTensor(signature, cName, &tensor)
+    }
+    try checkStatus(status)
+    guard let tensor else { throw LiteRtError.runtimeFailure }
+    return tensor
+  }
+
   /// Queries the tensor type for a specified input.
   ///
   /// - Parameters:
@@ -488,20 +544,28 @@ public final class CompiledModel {
     inputIndex: Int,
     signatureIndex: Int = 0
   ) throws -> TensorType {
-    var signature: LiteRtSignature?
-    var status = LiteRtGetModelSignature(cModel, size_t(signatureIndex), &signature)
-    try checkStatus(status)
-    guard let signature else { throw LiteRtError.runtimeFailure }
-
-    var tensor: LiteRtTensor?
-    status = LiteRtGetSignatureInputTensorByIndex(signature, size_t(inputIndex), &tensor)
-    try checkStatus(status)
-    guard let tensor else { throw LiteRtError.runtimeFailure }
-
+    let tensor = try getInputTensor(inputIndex: inputIndex, signatureIndex: signatureIndex)
     var cRankedType = LiteRtRankedTensorType()
-    status = LiteRtGetRankedTensorType(tensor, &cRankedType)
+    let status = LiteRtGetRankedTensorType(tensor, &cRankedType)
     try checkStatus(status)
+    return TensorType(cRankedType: cRankedType)
+  }
 
+  /// Queries the tensor type for a specified input name.
+  ///
+  /// - Parameters:
+  ///   - inputName: The name of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The tensor type of the input.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getInputTensorType(
+    inputName: String,
+    signatureIndex: Int = 0
+  ) throws -> TensorType {
+    let tensor = try getInputTensor(inputName: inputName, signatureIndex: signatureIndex)
+    var cRankedType = LiteRtRankedTensorType()
+    let status = LiteRtGetRankedTensorType(tensor, &cRankedType)
+    try checkStatus(status)
     return TensorType(cRankedType: cRankedType)
   }
 
@@ -516,21 +580,453 @@ public final class CompiledModel {
     outputIndex: Int,
     signatureIndex: Int = 0
   ) throws -> TensorType {
-    var signature: LiteRtSignature?
-    var status = LiteRtGetModelSignature(cModel, size_t(signatureIndex), &signature)
-    try checkStatus(status)
-    guard let signature else { throw LiteRtError.runtimeFailure }
-
-    var tensor: LiteRtTensor?
-    status = LiteRtGetSignatureOutputTensorByIndex(signature, size_t(outputIndex), &tensor)
-    try checkStatus(status)
-    guard let tensor else { throw LiteRtError.runtimeFailure }
-
+    let tensor = try getOutputTensor(outputIndex: outputIndex, signatureIndex: signatureIndex)
     var cRankedType = LiteRtRankedTensorType()
-    status = LiteRtGetRankedTensorType(tensor, &cRankedType)
+    let status = LiteRtGetRankedTensorType(tensor, &cRankedType)
     try checkStatus(status)
-
     return TensorType(cRankedType: cRankedType)
+  }
+
+  /// Queries the tensor type for a specified output name.
+  ///
+  /// - Parameters:
+  ///   - outputName: The name of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The tensor type of the output.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getOutputTensorType(
+    outputName: String,
+    signatureIndex: Int = 0
+  ) throws -> TensorType {
+    let tensor = try getOutputTensor(outputName: outputName, signatureIndex: signatureIndex)
+    var cRankedType = LiteRtRankedTensorType()
+    let status = LiteRtGetRankedTensorType(tensor, &cRankedType)
+    try checkStatus(status)
+    return TensorType(cRankedType: cRankedType)
+  }
+
+  /// Queries the quantization type ID for a specified input.
+  ///
+  /// - Parameters:
+  ///   - inputIndex: The index of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization type identifier of the input tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getInputTensorQuantizationTypeId(
+    inputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationTypeId {
+    let tensor = try getInputTensor(inputIndex: inputIndex, signatureIndex: signatureIndex)
+    var cQTypeId = kLiteRtQuantizationNone
+    let status = LiteRtGetQuantizationTypeId(tensor, &cQTypeId)
+    try checkStatus(status)
+    guard let qTypeId = QuantizationTypeId(cType: cQTypeId) else {
+      throw LiteRtError.unknown
+    }
+    return qTypeId
+  }
+
+  /// Queries the quantization type ID for a specified input name.
+  ///
+  /// - Parameters:
+  ///   - inputName: The name of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization type identifier of the input tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getInputTensorQuantizationTypeId(
+    inputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationTypeId {
+    let tensor = try getInputTensor(inputName: inputName, signatureIndex: signatureIndex)
+    var cQTypeId = kLiteRtQuantizationNone
+    let status = LiteRtGetQuantizationTypeId(tensor, &cQTypeId)
+    try checkStatus(status)
+    guard let qTypeId = QuantizationTypeId(cType: cQTypeId) else {
+      throw LiteRtError.unknown
+    }
+    return qTypeId
+  }
+
+  /// Queries the quantization type ID for a specified output.
+  ///
+  /// - Parameters:
+  ///   - outputIndex: The index of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization type identifier of the output tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getOutputTensorQuantizationTypeId(
+    outputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationTypeId {
+    let tensor = try getOutputTensor(outputIndex: outputIndex, signatureIndex: signatureIndex)
+    var cQTypeId = kLiteRtQuantizationNone
+    let status = LiteRtGetQuantizationTypeId(tensor, &cQTypeId)
+    try checkStatus(status)
+    guard let qTypeId = QuantizationTypeId(cType: cQTypeId) else {
+      throw LiteRtError.unknown
+    }
+    return qTypeId
+  }
+
+  /// Queries the quantization type ID for a specified output name.
+  ///
+  /// - Parameters:
+  ///   - outputName: The name of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization type identifier of the output tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getOutputTensorQuantizationTypeId(
+    outputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationTypeId {
+    let tensor = try getOutputTensor(outputName: outputName, signatureIndex: signatureIndex)
+    var cQTypeId = kLiteRtQuantizationNone
+    let status = LiteRtGetQuantizationTypeId(tensor, &cQTypeId)
+    try checkStatus(status)
+    guard let qTypeId = QuantizationTypeId(cType: cQTypeId) else {
+      throw LiteRtError.unknown
+    }
+    return qTypeId
+  }
+
+  /// Queries per-tensor quantization parameters for a specified input.
+  ///
+  /// - Parameters:
+  ///   - inputIndex: The index of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-tensor quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-tensor quantized or the query fails.
+  public func getInputTensorPerTensorQuantization(
+    inputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerTensor {
+    let tensor = try getInputTensor(inputIndex: inputIndex, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerTensor()
+    let status = LiteRtGetPerTensorQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerTensor(cQuantization: cQuant)
+  }
+
+  /// Queries per-tensor quantization parameters for a specified input name.
+  ///
+  /// - Parameters:
+  ///   - inputName: The name of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-tensor quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-tensor quantized or the query fails.
+  public func getInputTensorPerTensorQuantization(
+    inputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerTensor {
+    let tensor = try getInputTensor(inputName: inputName, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerTensor()
+    let status = LiteRtGetPerTensorQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerTensor(cQuantization: cQuant)
+  }
+
+  /// Queries per-tensor quantization parameters for a specified output.
+  ///
+  /// - Parameters:
+  ///   - outputIndex: The index of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-tensor quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-tensor quantized or the query fails.
+  public func getOutputTensorPerTensorQuantization(
+    outputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerTensor {
+    let tensor = try getOutputTensor(outputIndex: outputIndex, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerTensor()
+    let status = LiteRtGetPerTensorQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerTensor(cQuantization: cQuant)
+  }
+
+  /// Queries per-tensor quantization parameters for a specified output name.
+  ///
+  /// - Parameters:
+  ///   - outputName: The name of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-tensor quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-tensor quantized or the query fails.
+  public func getOutputTensorPerTensorQuantization(
+    outputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerTensor {
+    let tensor = try getOutputTensor(outputName: outputName, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerTensor()
+    let status = LiteRtGetPerTensorQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerTensor(cQuantization: cQuant)
+  }
+
+  /// Queries per-channel quantization parameters for a specified input.
+  ///
+  /// - Parameters:
+  ///   - inputIndex: The index of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-channel quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-channel quantized or the query fails.
+  public func getInputTensorPerChannelQuantization(
+    inputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerChannel {
+    let tensor = try getInputTensor(inputIndex: inputIndex, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerChannel()
+    let status = LiteRtGetPerChannelQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerChannel(cQuantization: cQuant)
+  }
+
+  /// Queries per-channel quantization parameters for a specified input name.
+  ///
+  /// - Parameters:
+  ///   - inputName: The name of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-channel quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-channel quantized or the query fails.
+  public func getInputTensorPerChannelQuantization(
+    inputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerChannel {
+    let tensor = try getInputTensor(inputName: inputName, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerChannel()
+    let status = LiteRtGetPerChannelQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerChannel(cQuantization: cQuant)
+  }
+
+  /// Queries per-channel quantization parameters for a specified output.
+  ///
+  /// - Parameters:
+  ///   - outputIndex: The index of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-channel quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-channel quantized or the query fails.
+  public func getOutputTensorPerChannelQuantization(
+    outputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerChannel {
+    let tensor = try getOutputTensor(outputIndex: outputIndex, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerChannel()
+    let status = LiteRtGetPerChannelQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerChannel(cQuantization: cQuant)
+  }
+
+  /// Queries per-channel quantization parameters for a specified output name.
+  ///
+  /// - Parameters:
+  ///   - outputName: The name of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The per-channel quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not per-channel quantized or the query fails.
+  public func getOutputTensorPerChannelQuantization(
+    outputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationPerChannel {
+    let tensor = try getOutputTensor(outputName: outputName, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationPerChannel()
+    let status = LiteRtGetPerChannelQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationPerChannel(cQuantization: cQuant)
+  }
+
+  /// Queries block-wise quantization parameters for a specified input.
+  ///
+  /// - Parameters:
+  ///   - inputIndex: The index of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The block-wise quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not block-wise quantized or the query fails.
+  public func getInputTensorBlockWiseQuantization(
+    inputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationBlockWise {
+    let tensor = try getInputTensor(inputIndex: inputIndex, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationBlockWise()
+    let status = LiteRtGetBlockWiseQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationBlockWise(cQuantization: cQuant)
+  }
+
+  /// Queries block-wise quantization parameters for a specified input name.
+  ///
+  /// - Parameters:
+  ///   - inputName: The name of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The block-wise quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not block-wise quantized or the query fails.
+  public func getInputTensorBlockWiseQuantization(
+    inputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationBlockWise {
+    let tensor = try getInputTensor(inputName: inputName, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationBlockWise()
+    let status = LiteRtGetBlockWiseQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationBlockWise(cQuantization: cQuant)
+  }
+
+  /// Queries block-wise quantization parameters for a specified output.
+  ///
+  /// - Parameters:
+  ///   - outputIndex: The index of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The block-wise quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not block-wise quantized or the query fails.
+  public func getOutputTensorBlockWiseQuantization(
+    outputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationBlockWise {
+    let tensor = try getOutputTensor(outputIndex: outputIndex, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationBlockWise()
+    let status = LiteRtGetBlockWiseQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationBlockWise(cQuantization: cQuant)
+  }
+
+  /// Queries block-wise quantization parameters for a specified output name.
+  ///
+  /// - Parameters:
+  ///   - outputName: The name of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The block-wise quantization parameters.
+  /// - Throws: `LiteRtError` if the tensor is not block-wise quantized or the query fails.
+  public func getOutputTensorBlockWiseQuantization(
+    outputName: String,
+    signatureIndex: Int = 0
+  ) throws -> QuantizationBlockWise {
+    let tensor = try getOutputTensor(outputName: outputName, signatureIndex: signatureIndex)
+    var cQuant = LiteRtQuantizationBlockWise()
+    let status = LiteRtGetBlockWiseQuantization(tensor, &cQuant)
+    try checkStatus(status)
+    return QuantizationBlockWise(cQuantization: cQuant)
+  }
+
+  /// Queries the complete quantization scheme for a specified input.
+  ///
+  /// - Parameters:
+  ///   - inputIndex: The index of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization scheme of the input tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getInputTensorQuantization(
+    inputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> Quantization {
+    let qTypeId = try getInputTensorQuantizationTypeId(
+      inputIndex: inputIndex, signatureIndex: signatureIndex)
+    switch qTypeId {
+    case .none:
+      return .none
+    case .perTensor:
+      return .perTensor(
+        try getInputTensorPerTensorQuantization(
+          inputIndex: inputIndex, signatureIndex: signatureIndex))
+    case .perChannel:
+      return .perChannel(
+        try getInputTensorPerChannelQuantization(
+          inputIndex: inputIndex, signatureIndex: signatureIndex))
+    case .blockWise:
+      return .blockWise(
+        try getInputTensorBlockWiseQuantization(
+          inputIndex: inputIndex, signatureIndex: signatureIndex))
+    }
+  }
+
+  /// Queries the complete quantization scheme for a specified input name.
+  ///
+  /// - Parameters:
+  ///   - inputName: The name of the input.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization scheme of the input tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getInputTensorQuantization(
+    inputName: String,
+    signatureIndex: Int = 0
+  ) throws -> Quantization {
+    let qTypeId = try getInputTensorQuantizationTypeId(
+      inputName: inputName, signatureIndex: signatureIndex)
+    switch qTypeId {
+    case .none:
+      return .none
+    case .perTensor:
+      return .perTensor(
+        try getInputTensorPerTensorQuantization(
+          inputName: inputName, signatureIndex: signatureIndex))
+    case .perChannel:
+      return .perChannel(
+        try getInputTensorPerChannelQuantization(
+          inputName: inputName, signatureIndex: signatureIndex))
+    case .blockWise:
+      return .blockWise(
+        try getInputTensorBlockWiseQuantization(
+          inputName: inputName, signatureIndex: signatureIndex))
+    }
+  }
+
+  /// Queries the complete quantization scheme for a specified output.
+  ///
+  /// - Parameters:
+  ///   - outputIndex: The index of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization scheme of the output tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getOutputTensorQuantization(
+    outputIndex: Int,
+    signatureIndex: Int = 0
+  ) throws -> Quantization {
+    let qTypeId = try getOutputTensorQuantizationTypeId(
+      outputIndex: outputIndex, signatureIndex: signatureIndex)
+    switch qTypeId {
+    case .none:
+      return .none
+    case .perTensor:
+      return .perTensor(
+        try getOutputTensorPerTensorQuantization(
+          outputIndex: outputIndex, signatureIndex: signatureIndex))
+    case .perChannel:
+      return .perChannel(
+        try getOutputTensorPerChannelQuantization(
+          outputIndex: outputIndex, signatureIndex: signatureIndex))
+    case .blockWise:
+      return .blockWise(
+        try getOutputTensorBlockWiseQuantization(
+          outputIndex: outputIndex, signatureIndex: signatureIndex))
+    }
+  }
+
+  /// Queries the complete quantization scheme for a specified output name.
+  ///
+  /// - Parameters:
+  ///   - outputName: The name of the output.
+  ///   - signatureIndex: The index of the signature to query. Defaults to 0.
+  /// - Returns: The quantization scheme of the output tensor.
+  /// - Throws: `LiteRtError` if the query fails.
+  public func getOutputTensorQuantization(
+    outputName: String,
+    signatureIndex: Int = 0
+  ) throws -> Quantization {
+    let qTypeId = try getOutputTensorQuantizationTypeId(
+      outputName: outputName, signatureIndex: signatureIndex)
+    switch qTypeId {
+    case .none:
+      return .none
+    case .perTensor:
+      return .perTensor(
+        try getOutputTensorPerTensorQuantization(
+          outputName: outputName, signatureIndex: signatureIndex))
+    case .perChannel:
+      return .perChannel(
+        try getOutputTensorPerChannelQuantization(
+          outputName: outputName, signatureIndex: signatureIndex))
+    case .blockWise:
+      return .blockWise(
+        try getOutputTensorBlockWiseQuantization(
+          outputName: outputName, signatureIndex: signatureIndex))
+    }
   }
 
   /// Queries the current runtime input tensor layout (reflecting dynamic resizing).
