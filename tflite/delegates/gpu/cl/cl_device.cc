@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/debugging/leak_check.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
@@ -438,7 +439,11 @@ void CLDevice::DisableOneLayerTextureArray() {
 absl::Status CreateDefaultGPUDevice(CLDevice* result) {
   // Get num. platforms
   cl_uint num_platforms;
-  cl_int status = clGetPlatformIDs(0, nullptr, &num_platforms);
+  cl_int status;
+  {
+    absl::LeakCheckDisabler disabler;
+    status = clGetPlatformIDs(0, nullptr, &num_platforms);
+  }
   if (status != CL_SUCCESS) {
     return absl::UnknownError(
         absl::StrFormat("clGetPlatformIDs returned %d", status));
