@@ -20,7 +20,9 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -39,6 +41,7 @@
 #include "litert/vendors/c/litert_compiler_plugin.h"
 #include "litert/vendors/nvidia/bytecode.h"
 #include "litert/vendors/nvidia/compiler/tensorrt_graph_builder.h"
+#include "litert/vendors/nvidia/memory_profile.h"
 #include "NvInferVersion.h"
 
 namespace {
@@ -56,6 +59,67 @@ enum class PartitionPolicy {
 std::string PartitionName(int index) {
   return "tensorrt_partition_" + std::to_string(index);
 }
+
+uint64_t HashSharedWeight(
+    const litert::nvidia::TensorRtRefitWeightBuildData& weight) {
+  constexpr uint64_t kOffset = 14695981039346656037ULL;
+  constexpr uint64_t kPrime = 1099511628211ULL;
+  uint64_t hash = kOffset;
+  auto add_bytes = [&](const void* data, size_t size) {
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < size; ++i) {
+      hash ^= bytes[i];
+      hash *= kPrime;
+    }
+  };
+  add_bytes(&weight.data_type, sizeof(weight.data_type));
+  add_bytes(&weight.count, sizeof(weight.count));
+  add_bytes(weight.data.data(), weight.data.size());
+  return hash;
+}
+
+class SharedWeightDeduper {
+ public:
+  uint32_t Add(litert::nvidia::TensorRtRefitWeightBuildData weight) {
+    logical_bytes_ += weight.data.size();
+    const uint64_t hash = HashSharedWeight(weight);
+    auto& candidates = indexes_by_hash_[hash];
+    for (uint32_t index : candidates) {
+      const auto& existing = weights_[index];
+      if (existing.data_type == weight.data_type &&
+          existing.count == weight.count && existing.data == weight.data) {
+        return index;
+      }
+    }
+    const uint32_t index = static_cast<uint32_t>(weights_.size());
+    unique_bytes_ += weight.data.size();
+    weights_.push_back(
+        {weight.data_type, weight.count, std::move(weight.data)});
+    candidates.push_back(index);
+    return index;
+  }
+
+  const std::vector<litert::nvidia::TensorRtSharedWeight>& weights() const {
+    return weights_;
+  }
+  size_t logical_bytes() const { return logical_bytes_; }
+  size_t unique_bytes() const { return unique_bytes_; }
+
+ private:
+  std::vector<litert::nvidia::TensorRtSharedWeight> weights_;
+  std::unordered_map<uint64_t, std::vector<uint32_t>> indexes_by_hash_;
+  size_t logical_bytes_ = 0;
+  size_t unique_bytes_ = 0;
+};
+
+struct PendingBundleEntry {
+  std::string function_name;
+  std::vector<std::string> input_names;
+  std::vector<std::string> output_names;
+  std::vector<uint8_t> engine;
+  std::optional<litert::nvidia::TensorRtLlmHeadBuildData> trtllm_head;
+  std::vector<litert::nvidia::TensorRtSharedWeightRef> refit_weights;
+};
 
 std::string TensorSummary(const litert::compiler::Tensor& tensor) {
   std::string summary =
@@ -530,6 +594,8 @@ std::vector<LiteRtOpWithPartitionIndex> FilterSmallPartitions(
 struct LiteRtCompiledResultT {
   std::vector<std::vector<uint8_t>> bytecodes;
   std::vector<std::string> call_infos;
+  std::vector<LiteRtParamIndex> bytecode_indices;
+  std::vector<litert::nvidia::TensorRtJitExecutable> jit_executables;
 };
 
 struct LiteRtCompilerPluginT {
@@ -624,13 +690,14 @@ LiteRtStatus LiteRtGetCompiledResultCallInfo(
   if (!compiled_result || !call_info || !call_info_size || !byte_code_idx) {
     return kLiteRtStatusErrorInvalidArgument;
   }
-  if (call_idx >= compiled_result->call_infos.size()) {
+  if (call_idx >= compiled_result->call_infos.size() ||
+      call_idx >= compiled_result->bytecode_indices.size()) {
     return kLiteRtStatusErrorIndexOOB;
   }
   const auto& info = compiled_result->call_infos[call_idx];
   *call_info = info.data();
   *call_info_size = info.size();
-  *byte_code_idx = call_idx;
+  *byte_code_idx = compiled_result->bytecode_indices[call_idx];
   return kLiteRtStatusOk;
 }
 
@@ -645,6 +712,24 @@ LiteRtStatus LiteRtGetNumCompiledResultCalls(
 
 void LiteRtDestroyCompiledResult(LiteRtCompiledResult compiled_result) {
   delete compiled_result;
+}
+
+LiteRtStatus LiteRtGetCompiledResultHandle(LiteRtCompiledResult compiled_result,
+                                           LiteRtParamIndex byte_code_idx,
+                                           LiteRtJitExecutable* handle) {
+  if (!compiled_result || !handle) {
+    return kLiteRtStatusErrorInvalidArgument;
+  }
+  if (compiled_result->jit_executables.empty()) {
+    *handle = nullptr;
+    return kLiteRtStatusOk;
+  }
+  if (byte_code_idx >= compiled_result->jit_executables.size()) {
+    return kLiteRtStatusErrorIndexOOB;
+  }
+  *handle = reinterpret_cast<LiteRtJitExecutable>(
+      &compiled_result->jit_executables[byte_code_idx]);
+  return kLiteRtStatusOk;
 }
 
 LiteRtStatus LiteRtCreateCompilerPlugin(
@@ -779,12 +864,19 @@ LiteRtStatus LiteRtCompilerPluginCompile(
   litert::compiler::Model model(compiler_plugin->ctx, partitions);
   auto result = std::make_unique<LiteRtCompiledResultT>();
   const auto num_partitions = model.NumSubgraphs();
-  result->bytecodes.reserve(num_partitions);
+  const bool shared_weights = litert::nvidia::TensorRtSharedWeightsEnabled();
+  result->bytecodes.reserve(shared_weights ? 1 : num_partitions);
   result->call_infos.reserve(num_partitions);
+  result->bytecode_indices.reserve(num_partitions);
+  SharedWeightDeduper shared_weight_store;
+  std::vector<PendingBundleEntry> pending_bundle_entries;
+  pending_bundle_entries.reserve(shared_weights ? num_partitions : 0);
   size_t total_bytecode_bytes = 0;
+  litert::nvidia::LogMemoryProfile("compiler", "compile_begin", soc_model);
 
   for (LiteRtParamIndex i = 0; i < num_partitions; ++i) {
     LITERT_ASSIGN_OR_RETURN(auto subgraph, model.Subgraph(i));
+    const auto function_name = PartitionName(i);
     LITERT_LOG(LITERT_INFO,
                "NVIDIA TensorRT-RTX compiling partition %d/%d with %d ops",
                static_cast<int>(i + 1), static_cast<int>(num_partitions),
@@ -797,6 +889,8 @@ LiteRtStatus LiteRtCompilerPluginCompile(
                    static_cast<int>(i + 1), op_summary.c_str());
       }
     }
+    litert::nvidia::LogMemoryProfile("compiler", "partition_build_begin",
+                                     function_name.c_str());
     auto engine_or = litert::nvidia::BuildTensorRtEngine(subgraph);
     if (!engine_or) {
       std::string op_codes;
@@ -820,7 +914,40 @@ LiteRtStatus LiteRtCompilerPluginCompile(
       return engine_or.Error().Status();
     }
     auto engine = std::move(*engine_or);
-    const auto function_name = PartitionName(i);
+    litert::nvidia::LogMemoryProfile("compiler", "partition_build_end",
+                                     function_name.c_str());
+    if (shared_weights) {
+      PendingBundleEntry pending;
+      pending.function_name = function_name;
+      pending.input_names = std::move(engine.input_names);
+      pending.output_names = std::move(engine.output_names);
+      pending.engine = std::move(engine.engine);
+      pending.trtllm_head = std::move(engine.trtllm_head);
+      pending.refit_weights.reserve(engine.refit_weights.size());
+      size_t partition_logical_weight_bytes = 0;
+      for (auto& weight : engine.refit_weights) {
+        partition_logical_weight_bytes += weight.data.size();
+        const std::string name = weight.name;
+        const uint32_t shared_index =
+            shared_weight_store.Add(std::move(weight));
+        pending.refit_weights.push_back({name, shared_index});
+      }
+      LITERT_LOG(LITERT_INFO,
+                 "NVIDIA TensorRT-RTX compiled %s partition %d/%d: "
+                 "plan_bytes=%zu refit_weights=%zu logical_weight_bytes=%zu "
+                 "cumulative_unique_weight_bytes=%zu",
+                 engine.is_stripped_plan ? "stripped" : "self-contained",
+                 static_cast<int>(i + 1), static_cast<int>(num_partitions),
+                 pending.engine.size(), pending.refit_weights.size(),
+                 partition_logical_weight_bytes,
+                 shared_weight_store.unique_bytes());
+      result->call_infos.push_back(function_name);
+      result->bytecode_indices.push_back(0);
+      pending_bundle_entries.push_back(std::move(pending));
+      litert::nvidia::LogMemoryProfile("compiler", "partition_retained",
+                                       function_name.c_str());
+      continue;
+    }
     litert::nvidia::TensorRtLlmHead trtllm_head;
     const litert::nvidia::TensorRtLlmHead* trtllm_head_ptr = nullptr;
     if (engine.trtllm_head.has_value()) {
@@ -850,9 +977,79 @@ LiteRtStatus LiteRtCompilerPluginCompile(
         static_cast<int>(i + 1), static_cast<int>(num_partitions),
         engine.engine.size(), packed.size(), total_bytecode_bytes);
     result->call_infos.push_back(function_name);
+    result->bytecode_indices.push_back(result->bytecodes.size());
     result->bytecodes.push_back(std::move(packed));
+    litert::nvidia::LogMemoryProfile("compiler", "partition_retained",
+                                     function_name.c_str());
   }
 
+  if (shared_weights) {
+    litert::nvidia::LogMemoryProfile("compiler", "bundle_pack_begin",
+                                     soc_model);
+    std::vector<litert::nvidia::TensorRtLlmHead> trtllm_heads(
+        pending_bundle_entries.size());
+    std::vector<litert::nvidia::TensorRtBundleEntry> bundle_entries;
+    bundle_entries.reserve(pending_bundle_entries.size());
+    for (size_t i = 0; i < pending_bundle_entries.size(); ++i) {
+      auto& pending = pending_bundle_entries[i];
+      const litert::nvidia::TensorRtLlmHead* head_ptr = nullptr;
+      if (pending.trtllm_head.has_value()) {
+        auto& head = trtllm_heads[i];
+        head.hidden_output_port = pending.trtllm_head->hidden_output_port;
+        head.logits_output_port = pending.trtllm_head->logits_output_port;
+        head.k = pending.trtllm_head->k;
+        head.n = pending.trtllm_head->n;
+        head.soft_cap = pending.trtllm_head->soft_cap;
+        head.weight_format = pending.trtllm_head->weight_format;
+        head.packed_weights = pending.trtllm_head->packed_weights.data();
+        head.packed_weights_size = pending.trtllm_head->packed_weights.size();
+        head.bf16_scales = pending.trtllm_head->bf16_scales.data();
+        head.bf16_scales_size = pending.trtllm_head->bf16_scales.size();
+        head_ptr = &head;
+      }
+      bundle_entries.push_back({pending.function_name, pending.input_names,
+                                pending.output_names, pending.engine.data(),
+                                pending.engine.size(), head_ptr,
+                                pending.refit_weights});
+    }
+    LITERT_ASSIGN_OR_RETURN(auto packed_bundle,
+                            litert::nvidia::PackTensorRtSharedWeightBundle(
+                                shared_weight_store.weights(), bundle_entries));
+    total_bytecode_bytes = packed_bundle.size();
+    result->bytecodes.push_back(std::move(packed_bundle));
+    LITERT_LOG(
+        LITERT_INFO,
+        "NVIDIA TensorRT-RTX packed shared-weight bundle: engines=%zu "
+        "shared_weights=%zu logical_weight_bytes=%zu unique_weight_bytes=%zu "
+        "saved_serialized_weight_bytes=%zu bytecode_bytes=%zu",
+        bundle_entries.size(), shared_weight_store.weights().size(),
+        shared_weight_store.logical_bytes(), shared_weight_store.unique_bytes(),
+        shared_weight_store.logical_bytes() -
+            shared_weight_store.unique_bytes(),
+        total_bytecode_bytes);
+    litert::nvidia::LogMemoryProfile("compiler", "bundle_pack_end", soc_model);
+  }
+
+  if (EnvEnabled("LITERT_NVIDIA_TENSORRT_JIT_HANDLE",
+                 /*default_value=*/false)) {
+    result->jit_executables.reserve(result->bytecodes.size());
+    for (const auto& bytecode : result->bytecodes) {
+      result->jit_executables.push_back(
+          {litert::nvidia::kTensorRtJitExecutableMagic,
+           litert::nvidia::kTensorRtJitExecutableVersion,
+           /*reserved=*/0, bytecode.data(),
+           static_cast<uint64_t>(bytecode.size())});
+    }
+    LITERT_LOG(LITERT_INFO,
+               "NVIDIA TensorRT-RTX exposing %zu in-memory JIT executable "
+               "handle(s); bytecode will not be copied into the rewritten "
+               "LiteRT FlatBuffer",
+               result->jit_executables.size());
+    litert::nvidia::LogMemoryProfile("compiler", "jit_handles_ready",
+                                     soc_model);
+  }
+
+  litert::nvidia::LogMemoryProfile("compiler", "compile_end", soc_model);
   *compiled_result = result.release();
   return kLiteRtStatusOk;
 }
