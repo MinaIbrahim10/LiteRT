@@ -62,6 +62,7 @@
 #include "ml_drift_delegate/delegate/serialization_weight_cache/serialization_weight_cache.h"
 // clang-format on
 #include "ml_drift_delegate/delegate/composite/custom_parsers.h"
+#include "ml_drift_delegate/delegate/composite/fuse_qkv_norm_rope.h"
 #include "ml_drift_delegate/delegate/composite/ir/custom_parsers.h"
 #include "ml_drift_delegate/delegate/composite/ir/litert_op_selector.h"
 #include "ml_drift_delegate/delegate/composite/litert_op_selector.h"
@@ -268,6 +269,11 @@ absl::Status DelegateKernel::InitializeGraphFloat32(
       context, delegate_params, options, &graph, &quant_conversion_map_,
       shared_tensors_ptr, tensor_to_buffer_id_map,
       tensor_to_external_buffer_id_map, &custom_parser_factory));
+
+  if (delegate_data_->options &&
+      delegate_data_->options->enable_qkv_norm_rope_fusion) {
+    ABSL_RETURN_IF_ERROR(::litert::ml_drift::FuseQkvNormRoPE(&graph));
+  }
 
   const TfLiteIntArray* input_tensors = delegate_params->input_tensors;
   const std::vector<::ml_drift::Value*> inputs =

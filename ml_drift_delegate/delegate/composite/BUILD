@@ -230,6 +230,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_macros",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@ml_drift//ml_drift/common:data_type",
         "@ml_drift//ml_drift/common:gpu_info",
         "@ml_drift//ml_drift/common:gpu_model_builder",
@@ -382,6 +383,21 @@ cc_library(
 alias(
     name = "qwen3_qkv_norm_rope_parser",
     actual = ":qkv_norm_rope_parser",
+)
+
+cc_library(
+    name = "fuse_qkv_norm_rope",
+    srcs = ["fuse_qkv_norm_rope.cc"],
+    hdrs = ["fuse_qkv_norm_rope.h"],
+    deps = [
+        ":qkv_norm_rope_parser",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/status",
+        "@ml_drift//ml_drift/common:data_type",
+        "@ml_drift//ml_drift/common:model",
+        "@ml_drift//ml_drift/common:operations",
+        "@ml_drift//ml_drift/common:shape",
+    ],
 )
 
 cc_library(
